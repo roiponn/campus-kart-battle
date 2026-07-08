@@ -113,9 +113,15 @@
     #titleFoot{display:none;} #muteHint{display:none;}
   }
   body.touch #controls{display:none;}
-  #tiltBtn{pointer-events:auto;cursor:pointer;margin-top:14px;padding:9px 22px;border-radius:999px;display:none;
-    background:rgba(30,32,64,.7);border:1.5px solid rgba(160,160,220,.5);color:#dfe0f5;font-weight:800;font-size:15px;font-family:inherit;}
+  .tiltToggle{pointer-events:auto;cursor:pointer;border-radius:999px;display:none;
+    background:rgba(30,32,64,.7);border:1.5px solid rgba(160,160,220,.5);color:#dfe0f5;font-weight:800;font-family:inherit;
+    box-shadow:0 3px 12px rgba(0,0,0,.35);}
+  .tiltToggle.on{background:rgba(100,210,150,.24);border-color:rgba(160,255,200,.75);color:#dfffe8;}
+  .tiltToggle.blocked{background:rgba(120,44,56,.72);border-color:rgba(255,150,160,.75);color:#ffe8ea;}
+  #tiltBtn{margin-top:14px;padding:9px 22px;font-size:15px;}
+  #tiltRaceBtn{position:absolute;left:22px;top:84px;padding:7px 13px;font-size:13px;z-index:12;}
   body.touch #tiltBtn{display:inline-block;}
+  body.touch #tiltRaceBtn{display:flex;align-items:center;justify-content:center;}
 
   /* ============ Title screen ============ */
   #title{position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -191,6 +197,7 @@
   <div id="toast"></div>
   <div id="wrongWay">⟲ 逆走中！</div>
   <div id="muteHint" class="hudTxt">M : サウンド</div>
+  <button class="tiltToggle" id="tiltRaceBtn" aria-label="傾きハンドル">📱 OFF</button>
   <div id="touchUI">
     <div class="tbtn" id="btnL">◀</div>
     <div class="tbtn" id="btnR">▶</div>
@@ -214,7 +221,7 @@
     <span><kbd>E</kbd>アイテム</span><span><kbd>M</kbd>サウンド</span>
   </div>
   <button class="btn" id="startBtn">レーススタート</button>
-  <button id="tiltBtn">📱 傾きハンドル : OFF</button>
+  <button class="tiltToggle" id="tiltBtn">📱 傾きハンドル : OFF</button>
   <div id="titleFoot">CPUライバル3人と勝負！ ドリフト長押しでミニターボ</div>
 </div>
 
@@ -265,8 +272,9 @@ addEventListener('keydown', e => {
 addEventListener('keyup', e => { const k = KEYMAP[e.code]; if (k) keys[k] = false; });
 
 /* ---------------- touch & tilt (mobile) ---------------- */
-const touchMode = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
-let tiltOn = false, tiltSteer = 0;
+const touchMode = ('ontouchstart' in window) || navigator.maxTouchPoints > 0 ||
+  (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+let tiltOn = false, tiltSteer = 0, tiltLastMs = 0, tiltStatus = 'off', tiltWatchTimer = 0;
 if (touchMode) document.body.classList.add('touch');
 function bindHold(id, key) {
   const el = $(id);
@@ -286,6 +294,7 @@ addEventListener('DOMContentLoaded', () => {
   ib.addEventListener('touchstart', useIt, { passive: false });
   ib.addEventListener('mousedown', useIt);
   $('tiltBtn').addEventListener('click', toggleTilt);
+  $('tiltRaceBtn').addEventListener('click', toggleTilt);
 });
 document.addEventListener('touchmove', e => { if (e.target.closest('#touchUI')) e.preventDefault(); }, { passive: false });
 function normalizedOrientationAngle(angle) {
@@ -311,16 +320,66 @@ function tiltSteerFromOrientation(e, angle) {
   return clamp(Math.sign(t) * m / 8, -1, 1);
 }
 function onTiltEvent(e) {
+  tiltLastMs = Date.now();
   tiltSteer = tiltSteerFromOrientation(e, currentOrientationAngle());
+  if (tiltStatus !== 'on') updateTiltButtons('on');
 }
-function toggleTilt() {
-  if (tiltOn) { tiltOn = false; tiltSteer = 0; removeEventListener('deviceorientation', onTiltEvent);
-    $('tiltBtn').textContent = '📱 傾きハンドル : OFF'; return; }
-  const enable = () => { tiltOn = true; addEventListener('deviceorientation', onTiltEvent);
-    $('tiltBtn').textContent = '📱 傾きハンドル : ON'; };
-  if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-    DeviceOrientationEvent.requestPermission().then(res => { if (res === 'granted') enable(); }).catch(() => {});
-  } else enable();
+function updateTiltButtons(status) {
+  tiltStatus = status;
+  const titleBtn = $('tiltBtn'), raceBtn = $('tiltRaceBtn');
+  const isOn = status === 'on' || status === 'waiting';
+  const isBlocked = status === 'blocked';
+  const titleText = status === 'on' ? '📱 傾きハンドル : ON' :
+    status === 'waiting' ? '📱 傾きハンドル : 待機中' :
+    status === 'blocked' ? '📱 傾きハンドル : 許可が必要' : '📱 傾きハンドル : OFF';
+  const raceText = status === 'on' ? '📱 ON' : status === 'waiting' ? '📱 …' : status === 'blocked' ? '📱 許可' : '📱 OFF';
+  for (const [btn, txt] of [[titleBtn, titleText], [raceBtn, raceText]]) {
+    if (!btn) continue;
+    btn.textContent = txt;
+    btn.classList.toggle('on', isOn);
+    btn.classList.toggle('blocked', isBlocked);
+  }
+}
+function setTiltEnabled(on, status) {
+  tiltOn = on;
+  tiltSteer = 0;
+  clearTimeout(tiltWatchTimer);
+  removeEventListener('deviceorientation', onTiltEvent);
+  if (on) {
+    tiltLastMs = 0;
+    addEventListener('deviceorientation', onTiltEvent);
+    updateTiltButtons(status || 'waiting');
+    tiltWatchTimer = setTimeout(() => {
+      if (tiltOn && !tiltLastMs) {
+        updateTiltButtons('waiting');
+        toast('📱 傾きセンサー待機中');
+      }
+    }, 1800);
+  } else updateTiltButtons(status || 'off');
+}
+async function toggleTilt() {
+  if (tiltOn) { setTiltEnabled(false); return; }
+  if (typeof DeviceOrientationEvent === 'undefined') {
+    setTiltEnabled(false, 'blocked');
+    toast('📱 このブラウザは傾き未対応です');
+    return;
+  }
+  if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+    updateTiltButtons('waiting');
+    try {
+      const res = await DeviceOrientationEvent.requestPermission();
+      if (res !== 'granted') {
+        setTiltEnabled(false, 'blocked');
+        toast('📱 モーション許可が必要です');
+        return;
+      }
+    } catch (_) {
+      setTiltEnabled(false, 'blocked');
+      toast('📱 モーション許可を確認できません');
+      return;
+    }
+  }
+  setTiltEnabled(true, 'waiting');
 }
 
 /* DOM refs */
