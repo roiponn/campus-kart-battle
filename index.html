@@ -285,8 +285,7 @@ function bindHold(id, key) {
   el.addEventListener('mousedown', on); el.addEventListener('mouseup', off); el.addEventListener('mouseleave', off);
 }
 addEventListener('DOMContentLoaded', () => {
-  // Touch arrows are mirrored to match the chase-camera steering direction.
-  bindHold('btnL', 'right'); bindHold('btnR', 'left');
+  bindHold('btnL', 'left'); bindHold('btnR', 'right');
   bindHold('btnDrift', 'drift'); bindHold('btnBrake', 'down');
   const ib = $('btnItem');
   const useIt = e => { e.preventDefault(); ib.classList.add('on'); setTimeout(() => ib.classList.remove('on'), 120);
@@ -316,8 +315,9 @@ function tiltAxisFromOrientation(e, angle) {
 function tiltSteerFromOrientation(e, angle) {
   const t = tiltAxisFromOrientation(e, angle);
   if (t == null || !Number.isFinite(t)) return 0;
-  const dz = .8, m = Math.max(0, Math.abs(t) - dz);
-  return clamp(Math.sign(t) * m / 8, -1, 1);
+  const dz = 1.1, m = Math.max(0, Math.abs(t) - dz);
+  if (m <= 0) return 0;
+  return clamp(Math.sign(t) * m / 9.5, -1, 1);
 }
 function onTiltEvent(e) {
   tiltLastMs = Date.now();
@@ -1003,7 +1003,7 @@ function hitCone(c, r) {
   const nearPl = r.isPlayer || r.pos.distanceTo(racers[0].pos) < 55;
   if (nearPl) AudioSys.sfx.cone();
   spinLite(r);
-  if (!r.isPlayer && perfT - (r.lastHitByPlayerT || -9) < 1.3) {
+  if (!r.isPlayer && perfT - (r.lastHitByPlayerT || -9) < 2.4) {
     flash('255,215,110', .18); toast('🎯 コーンにぶち当てた！'); AudioSys.sfx.comboDing(3);
     racers[0].speed += .5;
   }
@@ -1049,6 +1049,14 @@ function updateObstacles(dt) {
           r.kick = (r.kick || 0) + (Math.random() < .5 ? -.22 : .22);
           b.wob = .13;
           spawnHitSparks(r.pos, 8); spawnRing(r.pos, 1.7, .26);
+          if (!r.isPlayer && perfT - (r.lastHitByPlayerT || -9) < 2.4) {
+            spinLite(r);
+            r.hitVX = (r.hitVX || 0) + nx * 3.2;
+            r.hitVZ = (r.hitVZ || 0) + nz * 3.2;
+            if (!r.airborne) { r.airborne = true; r.vy = .8; }
+            flash('255,215,110', .18); toast('🎯 バリアに押し込んだ！'); AudioSys.sfx.comboDing(4);
+            racers[0].speed += .45;
+          }
           if (r.isPlayer) { AudioSys.sfx.hit(); shake(.3); flash('255,140,60', .1); hitstop(.05); }
           break;
         }
@@ -1783,9 +1791,9 @@ function buildKart(color, opts) {
 
 const RACER_DEF = [
   { name: 'あなた', color: 0x6a38d8, crown: true, hoodie: 0x2c2836, isPlayer: true },
-  { name: 'レン', color: 0x1fa098, mark: 'R', helmet: 0x1fa098, ai: { skill: .98, wob: 1.05, wobF: .5, late: 0 } },
-  { name: 'アカネ', color: 0xd8443a, mark: 'A', helmet: 0xd8443a, ai: { skill: 1.03, wob: 1.8, wobF: .85, late: 0, aggro: 1 } },
-  { name: 'ヒナタ', color: 0xdb9c22, mark: 'H', helmet: 0xdb9c22, ai: { skill: .96, wob: 1.45, wobF: .6, late: .06 } },
+  { name: 'レン', color: 0x1fa098, mark: 'R', helmet: 0x1fa098, ai: { skill: 1.0, wob: 1.0, wobF: .5, late: 0 } },
+  { name: 'アカネ', color: 0xd8443a, mark: 'A', helmet: 0xd8443a, ai: { skill: 1.06, wob: 1.65, wobF: .85, late: 0, aggro: 1 } },
+  { name: 'ヒナタ', color: 0xdb9c22, mark: 'H', helmet: 0xdb9c22, ai: { skill: .98, wob: 1.35, wobF: .6, late: .08 } },
 ];
 function initRacers() {
   racers = RACER_DEF.map((d, i) => {
@@ -1799,7 +1807,7 @@ function initRacers() {
       drifting: false, driftDir: 0, driftQ: 0,
       item: null, roulT: 0, shieldT: 0, shieldMesh: null,
       wrongT: 0, stuckT: 0, aiT: rnd(0, 2), aiLane: 0, autoPilot: false,
-      visLean: 0, visPitch: 0,
+      visLean: 0, visPitch: 0, hitVX: 0, hitVZ: 0,
       proj: { s: 0, lat: 0, idx: 0 },
     };
   });
@@ -1820,7 +1828,7 @@ function resetRace() {
     r.wrongT = 0; r.stuckT = 0; r.autoPilot = false; r.aiT = rnd(.4, 2);
     r.driftStage = 0; r.roulTick = 0; r.bumpCd = 0;
     r.steerVis = 0; r.curveT = 0; r.ctCd = 0; r.airT = 0; r.bumpCombo = 0; r.lastBumpT = -9;
-    r.draft = 1; r.kick = 0; r.blockCd = 0; r.lastHitByPlayerT = -9;
+    r.draft = 1; r.kick = 0; r.blockCd = 0; r.lastHitByPlayerT = -9; r.hitVX = 0; r.hitVZ = 0;
     r.aiT2 = rnd(3, 8); r.ramCd = 0;
     if (r.shieldMesh) { scene.remove(r.shieldMesh); r.shieldMesh = null; }
     r.shieldT = 0;
@@ -1893,11 +1901,11 @@ function aiDrive(r, dt, forceSkill) {
   if (!forceSkill) {
     if (ai.late && r.lapsDone >= 2) skill = ai.skill + ai.late;
     const diff = racers[0].totalProg - r.totalProg;               // rubber band vs player
-    skill *= clamp(1 + diff * .45, .96, 1.22);
+    skill *= clamp(1 + diff * .52, .97, 1.28);
     r.aiT2 -= dt;                                                  // periodic attack turbo
     if (r.aiT2 <= 0) {
-      r.aiT2 = rnd(9, 14);
-      if (r.boostT <= 0) { r.boostF = Math.max(r.boostF, 1.12); r.boostT = .35; }
+      r.aiT2 = rnd(8.5, 13);
+      if (r.boostT <= 0) { r.boostF = Math.max(r.boostF, 1.15); r.boostT = .42; }
     }
   }
   let lane = Math.sin(raceT * ai.wobF + r.def.color) * ai.wob;
@@ -1957,7 +1965,7 @@ function aiDrive(r, dt, forceSkill) {
   if (ang > .2 && !r.airborne) r.curveT += dt;
   else if (ang < .1) {
     if (r.curveT > .55 && r.ctCd <= 0 && !r.airborne) {
-      r.boostF = Math.max(r.boostF, 1.24); r.boostT = Math.max(r.boostT, .45); r.ctCd = 1.6;
+      r.boostF = Math.max(r.boostF, 1.28); r.boostT = Math.max(r.boostT, .5); r.ctCd = 1.45;
       spawnHitSparks(r.pos, 5);
     }
     r.curveT = 0;
@@ -1983,8 +1991,10 @@ function stepRacer(r, dt) {
   // integrate
   const slip = r.drifting ? -r.driftDir * .34 : 0;
   const h = r.heading + slip;
-  r.pos.x += Math.sin(h) * r.speed * dt;
-  r.pos.z += Math.cos(h) * r.speed * dt;
+  r.pos.x += (Math.sin(h) * r.speed + (r.hitVX || 0)) * dt;
+  r.pos.z += (Math.cos(h) * r.speed + (r.hitVZ || 0)) * dt;
+  r.hitVX = damp(r.hitVX || 0, 0, 4.5, dt);
+  r.hitVZ = damp(r.hitVZ || 0, 0, 4.5, dt);
   // project to track, wall clamp
   project(r.pos, r.hint, r.proj);
   r.hint = r.proj.idx;
@@ -2101,34 +2111,40 @@ function racerCollisions(dt) {
   for (let i = 0; i < racers.length; i++) for (let j = i + 1; j < racers.length; j++) {
     const a = racers[i], b = racers[j];
     const dx = b.pos.x - a.pos.x, dz = b.pos.z - a.pos.z, d2 = dx * dx + dz * dz;
-    if (d2 < 3.1 && d2 > .0001) {
-      const d = Math.sqrt(d2), push = (1.76 - d) / 2, nx = dx / d, nz = dz / d;
+    const hitRadius = 1.95;
+    if (d2 < hitRadius * hitRadius && d2 > .0001) {
+      const d = Math.sqrt(d2), push = (hitRadius - d) / 2, nx = dx / d, nz = dz / d;
       a.pos.x -= nx * push; a.pos.z -= nz * push;
       b.pos.x += nx * push; b.pos.z += nz * push;
       // closing speed along the contact normal
       const avx = Math.sin(a.heading) * a.speed, avz = Math.cos(a.heading) * a.speed;
       const bvx = Math.sin(b.heading) * b.speed, bvz = Math.cos(b.heading) * b.speed;
       const rel = (avx - bvx) * nx + (avz - bvz) * nz;             // >0: a rams b
-      const t = a.speed; a.speed = lerp(a.speed, b.speed, .16); b.speed = lerp(b.speed, t, .16);
+      const t = a.speed; a.speed = lerp(a.speed, b.speed, .22); b.speed = lerp(b.speed, t, .22);
       a.bumpCd = Math.max(0, (a.bumpCd || 0) - dt); b.bumpCd = Math.max(0, (b.bumpCd || 0) - dt);
-      if (Math.abs(rel) > 5 && a.bumpCd <= 0 && b.bumpCd <= 0) {
-        a.bumpCd = b.bumpCd = .3;
-        const ram = rel > 0 ? a : b, hitR = rel > 0 ? b : a, mag = Math.min(Math.abs(rel), 16);
+      if (Math.abs(rel) > 4 && a.bumpCd <= 0 && b.bumpCd <= 0) {
+        a.bumpCd = b.bumpCd = .24;
+        const ram = rel > 0 ? a : b, hitR = rel > 0 ? b : a, mag = Math.min(Math.abs(rel), 18);
+        const dir = rel > 0 ? 1 : -1;
         // shove: the rammed kart gets knocked off line, rammer keeps momentum
-        hitR.pos.x += nx * (rel > 0 ? 1 : -1) * mag * .05;
-        hitR.pos.z += nz * (rel > 0 ? 1 : -1) * mag * .05;
-        hitR.heading += (Math.random() < .5 ? -1 : 1) * mag * .012;
-        hitR.speed *= .9; ram.speed *= .985;
+        hitR.pos.x += nx * dir * mag * .11;
+        hitR.pos.z += nz * dir * mag * .11;
+        hitR.hitVX = (hitR.hitVX || 0) + nx * dir * mag * .72;
+        hitR.hitVZ = (hitR.hitVZ || 0) + nz * dir * mag * .72;
+        ram.hitVX = (ram.hitVX || 0) - nx * dir * mag * .12;
+        ram.hitVZ = (ram.hitVZ || 0) - nz * dir * mag * .12;
+        hitR.heading += (Math.random() < .5 ? -1 : 1) * mag * .023;
+        hitR.speed *= .78; ram.speed *= .97;
         _hit.set((a.pos.x + b.pos.x) / 2, .7, (a.pos.z + b.pos.z) / 2);
         spawnHitSparks(_hit, 6 + Math.floor(mag * .9));
         spawnRing(_hit, .8 + mag * .16, .3);
         const hexA = '#' + a.color.toString(16).padStart(6, '0'), hexB = '#' + b.color.toString(16).padStart(6, '0');
         if (mag > 7) spawnConfetti(_hit, 4 + Math.floor(mag * .7), [hexA, hexB, '#ffd257']);
         if (ram.isPlayer) hitR.lastHitByPlayerT = perfT;
-        const kick = .14 + mag * .012;
-        ram.kick += (Math.random() < .5 ? -kick : kick) * .6;
-        hitR.kick += (Math.random() < .5 ? -kick : kick);
-        if (!hitR.airborne && mag > 8) { hitR.airborne = true; hitR.vy = 1.3; }
+        const kick = .2 + mag * .018;
+        ram.kick += (Math.random() < .5 ? -kick : kick) * .65;
+        hitR.kick += (Math.random() < .5 ? -kick : kick) * 1.25;
+        if (!hitR.airborne && mag > 13) { hitR.airborne = true; hitR.vy = clamp(.75 + (mag - 13) * .08, .75, 1.25); }
         if (a.isPlayer || b.isPlayer) {
           AudioSys.sfx.bump(mag); shake(.1 + mag * .018);
           if (mag > 9) hitstop(.085);
@@ -2201,7 +2217,7 @@ function updateItemBoxes(dt) {
         r.item = rollItem(r); r.roulTick = 0;
         if (r.isPlayer) { AudioSys.sfx.decide(); setItemAction(ITEMS[r.item].icon, 'ready'); toast(ITEMS[r.item].icon + ' ' + ITEMS[r.item].label + ' GET!');
           DOM.itemBox.classList.remove('itemPop'); void DOM.itemBox.offsetWidth; DOM.itemBox.classList.add('itemPop'); }
-        else r.aiT = rnd(.9, 2.2);
+        else r.aiT = rnd(.75, 1.95);
       }
     }
   }
@@ -2353,10 +2369,10 @@ function updateItems(dt) {
     if (r.item === 'shield' || r.item === 'energy') { tryUseItem(r); }
     else if (r.item === 'rocket') {
       const ahead = racers.some(o => o !== r && !o.finished && o.totalProg > r.totalProg && o.totalProg - r.totalProg < .8);
-      if (ahead) tryUseItem(r); else r.aiT = .8;
+      if (ahead) tryUseItem(r); else r.aiT = .7;
     } else if (r.item === 'bomb') {
       const behind = racers.some(o => o !== r && o.totalProg < r.totalProg && r.totalProg - o.totalProg < .1);
-      if (behind || Math.random() < .25) tryUseItem(r); else r.aiT = 1.4;
+      if (behind || Math.random() < .3) tryUseItem(r); else r.aiT = 1.25;
     }
   }
 }
